@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CNC 2130 — virtual Pico</title>
+<style>
+  :root {
+    --bg: #eef1f4; --card: #fff; --ink: #1b2430; --muted: #66717e; --line: #dde2e8;
+    --green: #1f9d55; --yellow: #e0a800; --blue: #2d6cdf; --red: #d64545; --gray: #7b8794;
+    --accent: #0f6fff;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: #17202b; color: #fff;
+           display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+  header .clock { font-variant-numeric: tabular-nums; opacity: .85; }
+  header .sp { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid #3a4655; border-radius: 8px; overflow: hidden; }
+  .seg button { background: transparent; color: #cfd8e3; border: 0; padding: 6px 10px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .hbtn { background: #263241; color: #fff; border: 1px solid #3a4655; border-radius: 8px;
+          padding: 6px 10px; cursor: pointer; }
+  .hbtn:hover { background: #304054; }
+  main { padding: 14px 16px 40px; display: grid; gap: 14px;
+         grid-template-columns: repeat(12, minmax(0, 1fr)); max-width: 1500px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+             margin: 0 0 10px; font-weight: 650; }
+  .c3 { grid-column: span 3; } .c4 { grid-column: span 4; } .c5 { grid-column: span 5; }
+  .c6 { grid-column: span 6; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; }
+  .c12 { grid-column: span 12; }
+  @media (max-width: 1100px) { .c3, .c4, .c5 { grid-column: span 6; } .c7, .c8 { grid-column: span 12; } }
+  @media (max-width: 700px) { main { grid-template-columns: 1fr; } main > * { grid-column: 1 / -1 !important; } }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0;
+         border-bottom: 1px dashed var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .lbl b { display: block; }
+  .lbl small { color: var(--muted); }
+  .sw { position: relative; width: 52px; height: 28px; flex: none; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw span { position: absolute; inset: 0; background: #c7ced6; border-radius: 28px; cursor: pointer; transition: .15s; }
+  .sw span::before { content: ""; position: absolute; width: 22px; height: 22px; left: 3px; top: 3px;
+                     background: #fff; border-radius: 50%; transition: .15s; box-shadow: 0 1px 2px #0003; }
+  .sw input:checked + span { background: var(--green); }
+  .sw input:checked + span::before { transform: translateX(24px); }
+  .sw.warn input:checked + span { background: var(--red); }
+
+  .relay { margin-top: 12px; border-radius: 10px; padding: 12px; text-align: center; font-weight: 700;
+           border: 2px solid var(--line); background: #f6f8fa; color: var(--muted); }
+  .relay.on { background: #fde8e8; border-color: var(--red); color: var(--red); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px #d6454522; } }
+
+  .banner { border-radius: 12px; color: #fff; padding: 22px 16px; text-align: center; }
+  .banner .big { font-size: 30px; font-weight: 800; letter-spacing: .02em; }
+  .banner .sub { opacity: .92; margin-top: 4px; }
+  .st-WORKING { background: var(--green); } .st-IDLE { background: var(--yellow); color: #231a00; }
+  .st-PLANNED_STOP { background: var(--blue); } .st-BLOCKED, .st-SHUTDOWN { background: var(--red); }
+  .st-OFF { background: var(--gray); }
+  .bar { height: 8px; background: #e6eaef; border-radius: 8px; overflow: hidden; margin-top: 10px; }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .banner .bar { background: #ffffff55; } .banner .bar i { background: #fff; }
+  .qwarn { margin-top: 10px; background: #fde8e8; color: var(--red); border-radius: 8px; padding: 8px 10px;
+           font-weight: 650; display: flex; justify-content: space-between; }
+
+  .btns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
+  button.b { border: 1px solid var(--line); background: #f6f8fa; color: var(--ink); border-radius: 10px;
+             padding: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.b:hover { background: #eaf1ff; border-color: #bcd3ff; }
+  button.b.pri { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.b.red { color: var(--red); }
+  input[type=text], input[type=number] { width: 100%; padding: 7px 8px; border: 1px solid var(--line);
+             border-radius: 8px; font: inherit; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  label.f { font-size: 12px; color: var(--muted); display: block; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-variant-numeric: tabular-nums; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 650; }
+  .ok { background: #e3f6ea; color: var(--green); } .bad { background: #fde8e8; color: var(--red); }
+  .mid { background: #fff4d6; color: #8a6400; }
+
+  .reasons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+  @media (max-width: 700px) { .reasons { grid-template-columns: repeat(2, 1fr); } }
+  .reasons button { min-height: 58px; }
+  .qhead { background: #fff4d6; border-radius: 10px; padding: 10px 12px; }
+  .qhead b { font-size: 16px; }
+
+  .tbl-wrap { overflow: auto; max-height: 330px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: #f6f8fa; color: var(--muted); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  pre.term { background: #101820; color: #cfe3d2; border-radius: 10px; padding: 10px; margin: 0;
+             font: 12px/1.45 ui-monospace, Consolas, monospace; overflow: auto; max-height: 330px; white-space: pre-wrap; }
+  .toast { position: fixed; right: 16px; bottom: 16px; background: #17202b; color: #fff; padding: 10px 14px;
+           border-radius: 10px; opacity: 0; transition: .2s; pointer-events: none; max-width: 420px; }
+  .toast.show { opacity: 1; }
+  .dim { color: var(--muted); }
+  #selftest { display: none; }
+  .tr-PICO { color: #8fd18f; } .tr-PC { color: #8fc3ff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CNC 2130 · virtual Pico W + MES</h1>
+  <span class="clock" id="clock">—</span>
+  <span class="sp"></span>
+  <span class="dim" style="color:#9fb0c3">Tezlik</span>
+  <div class="seg" id="speed">
+    <button data-s="0">Pauza</button><button data-s="1">1×</button><button data-s="10">10×</button>
+    <button data-s="60">60×</button><button data-s="300">300×</button>
+  </div>
+  <button class="hbtn" data-adv="60">+1 daqiqa</button>
+  <button class="hbtn" data-adv="900">+15 daqiqa</button>
+  <button class="hbtn" id="reboot">Pico ni qayta yuklash</button>
+  <button class="hbtn" id="reset">Tozalash</button>
+  <button class="hbtn" id="runtests">Avtomatik sinovlar</button>
+</header>
+
+<main>
+  <section class="card c3">
+    <h2>Stanok signallari → Pico</h2>
+    <div class="row"><div class="lbl"><b>Tarmoq</b><small>S_PWR · GP1</small></div>
+      <label class="sw"><input type="checkbox" data-in="pwr"><span></span></label></div>
+    <div class="row"><div class="lbl"><b>Shpindel aylanmoqda</b><small>S_RUN · GP5 (chastotnik)</small></div>
+      <label class="sw"><input type="checkbox" data-in="run"><span></span></label></div>
+    <div class="row"><div class="lbl"><b>0 nuqtada</b><small>S_HOME · GP9 (induktiv datchik)</small></div>
+      <label class="sw"><input type="checkbox" data-in="home"><span></span></label></div>
+    <div class="row"><div class="lbl"><b>Ta'mirlash kaliti</b><small>S_MAINT · GP10</small></div>
+      <label class="sw warn"><input type="checkbox" data-in="maint"><span></span></label></div>
+    <div class="relay" id="relay">RELE K_OFF (GP0): bo'sh</div>
+    <h2 style="margin-top:16px">Stanok modeli</h2>
+    <div class="row"><div class="lbl"><b>Vaqt relesi tokni uzadi</b><small>rele yonganidan 5 s keyin</small></div>
+      <label class="sw"><input type="checkbox" data-model="auto"><span></span></label></div>
+    <div class="row"><div class="lbl"><b>Nosozlik: stanok o'chmaydi</b><small>SHUTDOWN_FAILED sinovi</small></div>
+      <label class="sw warn"><input type="checkbox" data-model="broken"><span></span></label></div>
+  </section>
+
+  <section class="card c5">
+    <h2>Operator paneli</h2>
+    <div class="banner st-OFF" id="banner">
+      <div class="big" id="bigtext">O'CHIQ</div>
+      <div class="sub" id="subtext">&nbsp;</div>
+      <div class="bar" id="idlebar" hidden><i></i></div>
+    </div>
+    <div class="qwarn" id="qwarn" hidden><span>SABAB KIRITING</span><span id="qcount"></span></div>
+    <div class="grid2" style="margin-top:12px">
+      <div><label class="f">Ish kodi</label><input type="text" id="job" value="ORD-2026-0417"></div>
+      <div><label class="f">Operator</label><input type="text" id="oper" value="OP-1142"></div>
+    </div>
+    <div class="btns">
+      <button class="b pri" id="startjob">Ishni boshlash</button>
+      <button class="b" id="endjob">Ishni tugatish</button>
+      <button class="b" data-stop="LUNCH" data-sec="3600">Tushlik (60 daq)</button>
+      <button class="b" data-stop="SETUP" data-sec="900">Sozlash (15 daq)</button>
+      <button class="b" id="stopend">To'xtashni tugatish</button>
+      <button class="b red" id="block">Smenani bloklash</button>
+    </div>
+    <dl class="kv" style="margin-top:14px" id="details"></dl>
+  </section>
+
+  <section class="card c4">
+    <h2>Aloqa (micro USB) va jurnal</h2>
+    <div class="row"><div class="lbl"><b>Kompyuter yoqiq</b><small>MES sahifasi USB portni ochgan</small></div>
+      <label class="sw"><input type="checkbox" data-net="pc"><span></span></label></div>
+    <div class="row"><div class="lbl"><b>Brauzer qotdi</b><small>port ochiq, lekin o'qimaydi</small></div>
+      <label class="sw warn"><input type="checkbox" data-net="stalled"><span></span></label></div>
+    <div class="row"><div class="lbl"><b>Holat</b></div><span id="conn" class="pill bad">uzilgan</span></div>
+    <dl class="kv" style="margin-top:8px" id="logkv"></dl>
+    <div class="dim" style="margin-top:8px;font-size:12px">Jurnal hajmi</div>
+    <div class="bar" id="logbar"><i></i></div>
+    <div class="dim" style="margin-top:8px;font-size:12px">WDT: eng uzun oziqlantirish oralig'i (chegara 8000 ms)</div>
+    <div class="bar" id="wdtbar"><i></i></div>
+    <div class="btns">
+      <button class="b" id="dropev">Keyingi hodisani saqlamaslik</button>
+      <button class="b" id="badmsg">Buzuq xabar yuborish</button>
+    </div>
+    <h2 style="margin-top:16px">Sozlamalar (MES → Pico)</h2>
+    <div class="grid2">
+      <div><label class="f">t1, daqiqa (0 nuqtada)</label><input type="number" step="0.5" id="c_t1"></div>
+      <div><label class="f">t2, daqiqa (tashqarida)</label><input type="number" step="0.5" id="c_t2"></div>
+      <div><label class="f">t_reason, daqiqa</label><input type="number" step="0.5" id="c_t_reason"></div>
+      <div><label class="f">t_merge, soniya</label><input type="number" id="c_t_merge"></div>
+      <div><label class="f">t_relay, soniya (rele yoniq turadi)</label><input type="number" id="c_t_relay"></div>
+    </div>
+    <div class="dim" style="font-size:12px;margin-top:4px">Bo'sh turish vaqtlari daqiqada,
+      texnik qiymatlar (signal filtri va rele ushlash) soniyada.</div>
+    <div class="row"><div class="lbl"><b>Avtomatik o'chirish</b></div>
+      <label class="sw"><input type="checkbox" id="c_auto"><span></span></label></div>
+    <button class="b pri" id="sendcfg" style="width:100%">Sozlamani yuborish</button>
+  </section>
+
+  <section class="card c5">
+    <h2>Sabablar navbati (TZ 7) · <span id="qlen">0</span> ta</h2>
+    <div id="queue"><div class="dim">Navbat bo'sh</div></div>
+  </section>
+
+  <section class="card c7">
+    <h2>MES: qabul qilingan hodisalar</h2>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>ID</th><th>Turi</th><th>Boshlanish</th><th class="num">Davom</th>
+        <th>Ish</th><th>Sabab</th><th>Vaqt</th></tr></thead>
+      <tbody id="mesrows"></tbody></table></div>
+    <div class="dim" style="margin-top:8px" id="onbyday"></div>
+  </section>
+
+  <section class="card c4">
+    <h2>Pico fleshidagi jurnal (oxirgi)</h2>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th class="num">seq</th><th>Turi</th><th class="num">Davom</th><th>Holat</th></tr></thead>
+      <tbody id="picorows"></tbody></table></div>
+  </section>
+  <section class="card c4">
+    <h2>USB trafik (Pico ↔ kompyuter)</h2>
+    <pre class="term" id="traffic"></pre>
+  </section>
+  <section class="card c4">
+    <h2>Pico konsoli (print)</h2>
+    <pre class="term" id="console"></pre>
+  </section>
+
+  <section class="card c12" id="selftest">
+    <h2>Avtomatik sinovlar natijasi</h2>
+    <pre class="term" id="testout" style="max-height:520px"></pre>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+let S = null;
+let cfgLoaded = false;
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
+}
+async function post(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"},
+                               body: JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!j.ok && j.msg) toast(j.msg);
+  refresh();
+  return j;
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function human(s) {
+  s = Math.floor(s || 0);
+  if (s < 60) return s + " soniya";
+  if (s < 3600) return Math.floor(s / 60) + " daqiqa";
+  return Math.floor(s / 3600) + " soat " + Math.floor((s % 3600) / 60) + " daqiqa";
+}
+const STOP_NAMES = {LUNCH: "TUSHLIK", SETUP: "SOZLASH", REPAIR: "TA'MIRLASH", HANDOVER: "SMENA TOPSHIRISH"};
+const TYPE_UZ = {
+  POWER_ON: "Yoqiq turdi", POWER_CYCLE: "Tok o'chib-yondi", UNPLANNED_STOP: "Rejasiz to'xtash",
+  SPINDLE_IDLE: "Bo'sh turish", AUTO_SHUTDOWN: "Avto o'chirish", SHUTDOWN_FAILED: "O'chmadi",
+  PLANNED_STOP: "Rejali to'xtash", LOG_FULL: "Jurnal to'ldi"
+};
+
+function render(s) {
+  S = s;
+  const sn = s.snap;
+  $("#clock").textContent = "Pico soati: " + (sn.ts ? s.sim_time : "noma'lum") + "  ·  manba: " + sn.time_source
+    + "  ·  yoqilgandan beri " + human(sn.uptime_sec) + "  ·  yuklanish #" + s.boots;
+  $$("#speed button").forEach(b => b.classList.toggle("on", +b.dataset.s === s.speed));
+  $$("[data-in]").forEach(i => { i.checked = !!s.inputs[i.dataset.in]; });
+  $$("[data-net]").forEach(i => { i.checked = !!s.net[i.dataset.net]; });
+  $$("[data-model]").forEach(i => { i.checked = !!s.model[i.dataset.model]; });
+
+  const relay = $("#relay");
+  relay.classList.toggle("on", s.relay);
+  relay.textContent = s.relay ? "RELE K_OFF (GP0): YONIQ — stanok o'chirilmoqda" : "RELE K_OFF (GP0): bo'sh";
+
+  // Holat banneri (TZ 12.2)
+  const st = sn.state;
+  const cls = (st === "IDLE_HOME" || st === "IDLE_AWAY") ? "IDLE" : st;
+  $("#banner").className = "banner st-" + cls;
+  let big = {WORKING: "ISHLAYAPTI", OFF: "O'CHIQ", BLOCKED: "BLOKLANGAN", SHUTDOWN: "O'CHIRILMOQDA"}[st];
+  let sub = "";
+  const bar = $("#idlebar");
+  bar.hidden = true;
+  if (cls === "IDLE") {
+    big = "BO'SH TURIBDI — " + human(sn.idle_sec);
+    sub = (st === "IDLE_HOME" ? "0 nuqtada" : "0 nuqtadan tashqarida");
+    if (s.shutdown_blocked_by === "maint") sub += " · ta'mirlash kaliti: o'chirish bloklangan";
+    else if (s.shutdown_blocked_by === "config") sub += " · avtomatik o'chirish o'chiq";
+    else if (s.shutdown_blocked_by === "failed") sub += " · o'chirish muvaffaqiyatsiz, qayta urinilmaydi";
+    else if (s.limit) {
+      sub += " · " + human(Math.max(0, s.limit - sn.idle_sec)) + " dan keyin o'chadi";
+      bar.hidden = false;
+      bar.firstElementChild.style.width = Math.min(100, 100 * sn.idle_sec / s.limit) + "%";
+    }
+  } else if (st === "PLANNED_STOP") {
+    big = STOP_NAMES[sn.planned] || sn.planned;
+    sub = human(sn.planned_sec) + " o'tdi";
+  } else if (st === "WORKING") {
+    sub = sn.job ? ("Ish: " + sn.job + " · " + (sn.operator || "")) : "Ish tanlanmagan";
+  } else if (st === "SHUTDOWN") {
+    sub = "Rele ushlab turilibdi, tok uzilishi kutilmoqda";
+  }
+  $("#bigtext").textContent = big;
+  $("#subtext").textContent = sub || " ";
+  $("#qwarn").hidden = s.mes.queue_len === 0;
+  $("#qcount").textContent = s.mes.queue_len + " ta";
+  $("#block").textContent = sn.blocked ? "Blokni ochish" : "Smenani bloklash";
+
+  $("#details").innerHTML = [
+    ["Ish / operator", (sn.job || "—") + " / " + (sn.operator || "—")],
+    ["t1 / t2", human(sn.t1) + " / " + human(sn.t2)],
+    ["t_reason / t_merge", human(sn.t_reason) + " / " + human(sn.t_merge)],
+    ["t_relay (rele ushlab turish)", human(sn.t_relay)],
+    ["Avto o'chirish", sn.auto_shutdown ? "yoqiq" : "o'chiq"],
+    ["Stanok yoqiq / shpindel", human(sn.on_sec) + " / " + human(sn.run_sec)],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+
+  const c = $("#conn");
+  c.textContent = s.net.connected ? "ulangan" : "kompyuter yo'q — jurnalga yozilmoqda";
+  c.className = "pill " + (s.net.connected ? "ok" : "bad");
+  const L = s.log;
+  $("#logkv").innerHTML = [
+    ["Oxirgi seq", L.seq], ["MES tasdiqlagan", L.last_ack],
+    ["Yuborilmagan", L.pending + (L.full ? "  (TO'LDI)" : "")],
+    ["Hajm", (L.bytes / 1000).toFixed(1) + " / " + (L.max_bytes / 1000) + " KB"],
+    ["MES: dublikat rad etildi", s.mes.duplicates], ["MES: vaqt sinxronlash", s.mes.time_syncs],
+    ["Saqlanmaydigan hodisa", s.net.drop_next],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+  $("#logbar i").style.width = Math.min(100, 100 * L.bytes / L.max_bytes) + "%";
+  const w = $("#wdtbar i");
+  w.style.width = Math.min(100, 100 * s.wdt.max_gap / s.wdt.timeout) + "%";
+  w.style.background = s.wdt.max_gap > s.wdt.timeout * 0.6 ? "var(--red)" : "var(--green)";
+  w.title = s.wdt.max_gap + " ms";
+
+  if (!cfgLoaded) {
+    const toMin = (s) => Math.round(s / 6) / 10;     // soniya -> daqiqa
+    $("#c_t1").value = toMin(sn.t1); $("#c_t2").value = toMin(sn.t2);
+    $("#c_t_reason").value = toMin(sn.t_reason); $("#c_t_merge").value = sn.t_merge;
+    $("#c_t_relay").value = sn.t_relay;
+    $("#c_auto").checked = sn.auto_shutdown; cfgLoaded = true;
+  }
+
+  renderQueue(s);
+
+  $("#mesrows").innerHTML = s.mes.events.slice().reverse().map(e => `<tr>
+    <td>${esc(e.id)}</td><td>${esc(TYPE_UZ[e.type] || e.type)}${e.type === "POWER_ON" ? '<br><span class="dim">shpindel ' + esc(human(e.run_sec)) + "</span>" : ""}</td>
+    <td>${e.start ? esc(e.start.replace("T", " ")) : '<span class="dim">kun ichida</span>'}</td>
+    <td class="num">${e.duration_sec == null ? "—" : esc(human(e.duration_sec))}</td><td>${esc(e.job || "—")}</td>
+    <td>${!e.reason_required ? '<span class="dim">kerak emas</span>' :
+          e._closed ? '<span class="pill ok">' + esc(s.reasons[e._reason] || e._reason) + "</span>" :
+          '<span class="pill bad">kutilmoqda</span>'}</td>
+    <td>${e.time_uncertain ? '<span class="pill mid">noma\'lum</span>' :
+          e.time_restored ? '<span class="pill ok">tiklandi</span>' : '<span class="pill ok">aniq</span>'}</td></tr>`).join("")
+    || '<tr><td colspan="7" class="dim">Hali hodisa yo\'q</td></tr>';
+  const days = Object.entries(s.mes.on_by_day);
+  $("#onbyday").textContent = days.length
+    ? "Stanok yoqiq turgan vaqt (oylik hisobot uchun): " + days.map(([d, sec]) => d + " — " + human(sec)).join(", ")
+    : "";
+
+  $("#picorows").innerHTML = L.tail.slice().reverse().map(e => `<tr>
+    <td class="num">${e.seq}</td><td>${esc(e.type)}</td>
+    <td class="num">${e.duration_sec == null ? "—" : e.duration_sec + " s"}</td>
+    <td>${e.seq <= L.last_ack ? '<span class="pill ok">tasdiqlangan</span>' : '<span class="pill mid">yuborilmagan</span>'}</td></tr>`).join("")
+    || '<tr><td colspan="4" class="dim">Jurnal bo\'sh</td></tr>';
+
+  $("#traffic").innerHTML = s.traffic.slice().reverse().map(([ms, d, tp, m]) =>
+    `<span class="tr-${d.replace('>', '')}">${esc(d.padEnd(6))}</span> ${esc(tp.padEnd(6))} ${esc(m)}`).join("\n");
+  $("#console").textContent = s.console.slice().reverse().join("\n");
+}
+
+function renderQueue(s) {
+  const q = s.mes.queue;
+  $("#qlen").textContent = s.mes.queue_len;
+  const box = $("#queue");
+  if (!q.length) { box.innerHTML = '<div class="dim">Navbat bo\'sh. Yangi hodisa kelganda shu yerda chiqadi.</div>'; box._id = null; return; }
+  const e = q[0];
+  if (box._id === e.id && box._n === s.mes.queue_len) return;   // matn yozilayotganda qayta chizilmasin
+  box._id = e.id; box._n = s.mes.queue_len;
+  let same = 0;
+  for (const x of q) { if (x.type !== e.type) break; same++; }
+  box.innerHTML = `
+    <div class="qhead"><b>${esc(TYPE_UZ[e.type] || e.type)}</b> · ${esc(human(e.duration_sec))}
+      <div class="dim">${esc((e.start || "").replace("T", " "))} · ${esc(e.job || "ish yo'q")} · ${esc(e.id)}</div></div>
+    <div class="reasons">${Object.entries(s.reasons).filter(([k]) => k !== "OTHER").slice(0, 8)
+      .map(([k, v]) => `<button class="b" data-reason="${k}">${esc(v)}</button>`).join("")}</div>
+    <div class="grid2" style="margin-top:8px;grid-template-columns:1fr auto">
+      <input type="text" id="othertext" placeholder="Boshqa sabab (matn majburiy)">
+      <button class="b" data-reason="OTHER">Boshqa</button></div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input type="checkbox" id="group"> Ketma-ket bir xil turdagi ${same} ta hodisaga bir xil sabab</label>
+    <div class="dim" style="margin-top:6px;font-size:12px">Navbat FIFO: eng eski hodisani o'tkazib yuborib bo'lmaydi (TZ 7.1).</div>`;
+  box.querySelectorAll("[data-reason]").forEach(b => b.onclick = async () => {
+    const j = await post("/api/reason", {id: e.id, code: b.dataset.reason,
+      text: $("#othertext").value, group: $("#group").checked});
+    if (j.ok) { toast(j.msg); box._id = null; }
+  });
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/state");
+    render(await r.json());
+  } catch (err) { $("#clock").textContent = "Server bilan aloqa yo'q"; }
+}
+
+// ---------- boshqaruv ----------
+$$("[data-in]").forEach(i => i.onchange = () => post("/api/input", {[i.dataset.in]: i.checked}));
+$$("[data-net]").forEach(i => i.onchange = () => post("/api/net", {[i.dataset.net]: i.checked}));
+$$("[data-model]").forEach(i => i.onchange = () => post("/api/model", {[i.dataset.model]: i.checked}));
+$$("#speed button").forEach(b => b.onclick = () => post("/api/speed", {speed: +b.dataset.s}));
+$$("[data-adv]").forEach(b => b.onclick = () => post("/api/advance", {seconds: +b.dataset.adv}));
+$("#reboot").onclick = () => post("/api/reboot").then(() => toast("Pico qayta yuklandi"));
+$("#reset").onclick = () => { cfgLoaded = false; post("/api/reset").then(() => toast("Hammasi tozalandi")); };
+$("#startjob").onclick = () => post("/api/cmd", {cmd: "start_job", job: $("#job").value, operator: $("#oper").value});
+$("#endjob").onclick = () => post("/api/cmd", {cmd: "end_job"});
+$$("[data-stop]").forEach(b => b.onclick = () =>
+  post("/api/cmd", {cmd: "planned_stop", type: b.dataset.stop, planned_sec: +b.dataset.sec}));
+$("#stopend").onclick = () => post("/api/cmd", {cmd: "planned_stop_end"});
+$("#block").onclick = () => post("/api/cmd", {cmd: "block", value: !(S && S.snap.blocked)});
+$("#dropev").onclick = () => post("/api/net", {drop_next: 1}).then(() => toast("Keyingi hodisa xabari yo'qotiladi"));
+$("#badmsg").onclick = async () => {
+  await post("/api/raw", {text: "{buzuq json"});
+  await post("/api/config", {t1: "abc", t2: -5});
+  toast("Buzuq xabarlar yuborildi — aloqa uzilmasligi kerak");
+};
+$("#sendcfg").onclick = () => {
+  const v = (id) => parseInt($(id).value, 10);
+  // daqiqa -> soniya. Vergul bilan yozilgan kasr ham qabul qilinadi
+  const min = (id) => Math.round(parseFloat(String($(id).value).replace(",", ".")) * 60);
+  const vals = {t1: min("#c_t1"), t2: min("#c_t2"), t_reason: min("#c_t_reason"),
+                t_merge: v("#c_t_merge"), t_relay: v("#c_t_relay")};
+  const bad = Object.entries(vals).filter(([k, x]) => !Number.isFinite(x)).map(([k]) => k);
+  if (bad.length) return toast("Noto'g'ri qiymat: " + bad.join(", "));
+  post("/api/config", Object.assign(vals, {auto_shutdown: $("#c_auto").checked}))
+    .then(() => toast("Sozlama MES orqali yuborildi"));
+};
+$("#runtests").onclick = async () => {
+  const box = $("#selftest"); box.style.display = "block";
+  $("#testout").textContent = "Sinovlar ishlayapti...";
+  box.scrollIntoView({behavior: "smooth"});
+  const r = await fetch("/api/selftest", {method: "POST", body: "{}"});
+  const j = await r.json();
+  $("#testout").textContent = j.out;
+  toast(j.code === 0 ? "Barcha sinovlar o'tdi" : "Sinovlarda xato bor!");
+};
+
+refresh();
+setInterval(refresh, 500);
+</script>
+</body>
+</html>

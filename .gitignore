@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+events.jsonl
+state.json
+*.tmp
+.DS_Store
+.vscode/*.log
+jurnal/
+
+# Yig'ilgan dastur va vaqtinchalik fayllar
+build/
+dist/
+*.exe
+*.spec
+mes_malumot.json
+*.wav
+
+# Sinov paytida tashlangan rasmlar
+tools/*.jpg
+tools/*.png

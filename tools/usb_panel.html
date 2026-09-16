@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CNC 2130 — USB namunaviy sahifa</title>
+<!--
+  MES dasturchilari uchun NAMUNA: brauzer Pico bilan micro USB orqali
+  to'g'ridan-to'g'ri gaplashadi (Web Serial). Kompyuterga dastur o'rnatilmaydi.
+
+  Talablar:
+    - Chrome yoki Edge (Firefox/Safari da Web Serial yo'q).
+    - Xavfsiz manba: https://..., http://localhost yoki faylni to'g'ridan-to'g'ri ochish.
+      Oddiy http://192.168.x.x da navigator.serial bo'lmaydi.
+    - Birinchi marta "Pico ga ulash" tugmasi bilan port tanlanadi, keyin
+      sahifa ochilganda o'zi ulanadi.
+    - Port bir vaqtda bitta dasturda: stanok.py ishlatilganda sahifani yoping.
+
+  Protokol: firmware/main.py boshidagi izohda. Qisqacha:
+    PC -> Pico: time (har 10 s), ack, config, jobs, cmd
+    Pico -> PC: hello, state (har 10 s), event, log
+
+  MUHIM QOIDA: hodisa serverga saqlangandan KEYIN tasdiqlanadi va faqat
+  uzilishsiz ketma-ketlik bo'yicha (ack seq = oraliqsiz saqlangan eng katta seq).
+  saveEvent() funksiyasini haqiqiy MES serveriga yozadigan qiling.
+
+  Pico siz ko'rish: sahifa manziliga #demo qo'shing.
+-->
+<style>
+  :root { --bg:#eef1f4; --card:#fff; --ink:#1b2430; --muted:#66717e; --line:#dde2e8;
+          --green:#1f9d55; --yellow:#e0a800; --blue:#2d6cdf; --red:#d64545; --gray:#7b8794; --accent:#0f6fff; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; }
+  header { background: #17202b; color: #fff; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 16px; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .sp { flex: 1; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 650; }
+  .ok { background: #e3f6ea; color: var(--green); } .bad { background: #fde8e8; color: var(--red); } .mid { background: #fff4d6; color: #8a6400; }
+  main { max-width: 1300px; margin: 0 auto; padding: 14px 16px 40px; display: grid; gap: 14px; grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  .c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+  @media (max-width: 900px) { main > * { grid-column: 1 / -1 !important; } }
+  .banner { border-radius: 12px; color: #fff; padding: 20px 14px; text-align: center; background: var(--gray); }
+  .banner .big { font-size: 28px; font-weight: 800; } .banner .sub { opacity: .92; }
+  .st-WORKING { background: var(--green); } .st-IDLE { background: var(--yellow); color: #231a00; }
+  .st-PLANNED_STOP { background: var(--blue); } .st-BLOCKED, .st-SHUTDOWN { background: var(--red); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin-top: 12px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-weight: 600; }
+  button { border: 1px solid var(--line); background: #f6f8fa; color: var(--ink); border-radius: 10px; padding: 9px 12px; font: inherit; font-weight: 600; cursor: pointer; }
+  button:hover { background: #eaf1ff; }
+  button.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
+  input { width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  label.f { font-size: 12px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tbl { overflow: auto; max-height: 360px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: #f6f8fa; color: var(--muted); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  pre { background: #101820; color: #cfe3d2; border-radius: 10px; padding: 10px; margin: 0; font: 12px/1.45 Consolas, monospace;
+        max-height: 300px; overflow: auto; white-space: pre-wrap; }
+  .warn { background: #fde8e8; color: var(--red); border-radius: 10px; padding: 12px; font-weight: 600; }
+  .dim { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>CNC 2130 · Pico (micro USB)</h1>
+  <span id="conn" class="pill bad">ulanmagan</span>
+  <span id="pinfo" style="opacity:.8"></span>
+  <span class="sp"></span>
+  <button id="connect" class="pri">Pico ga ulash</button>
+  <button id="disconnect" hidden>Uzish</button>
+</header>
+<main>
+  <div class="c12 warn" id="nosupport" hidden></div>
+
+  <section class="card c5">
+    <h2>Stanok holati</h2>
+    <div class="banner" id="banner"><div class="big" id="big">MA'LUMOT YO'Q</div><div class="sub" id="sub">Pico ulanmagan — stanok o'chiq deb hisoblanadi</div></div>
+    <dl class="kv" id="kv"></dl>
+  </section>
+
+  <section class="card c7">
+    <h2>Boshqaruv (MES → Pico)</h2>
+    <div class="grid2">
+      <div><label class="f">Ish kodi</label><input id="job" value="ORD-2026-0417"></div>
+      <div><label class="f">Operator</label><input id="oper" value="OP-1142"></div>
+    </div>
+    <div class="btns">
+      <button data-cmd="start_job">Ishni boshlash</button>
+      <button data-cmd="end_job">Ishni tugatish</button>
+      <button data-stop="LUNCH" data-sec="3600">Tushlik (60 daq)</button>
+      <button data-stop="SETUP" data-sec="900">Sozlash (15 daq)</button>
+      <button data-cmd="planned_stop_end">To'xtashni tugatish</button>
+      <button id="block">Bloklash / ochish</button>
+    </div>
+    <h2 style="margin-top:16px">Sozlamalar</h2>
+    <div class="grid2">
+      <div><label class="f">t1, daqiqa (0 nuqtada)</label><input type="number" step="0.5" id="t1" value="15"></div>
+      <div><label class="f">t2, daqiqa (tashqarida)</label><input type="number" step="0.5" id="t2" value="15"></div>
+      <div><label class="f">t_reason, daqiqa</label><input type="number" step="0.5" id="t_reason" value="15"></div>
+      <div><label class="f">t_merge, soniya</label><input type="number" id="t_merge" value="30"></div>
+      <div><label class="f">t_relay, soniya (rele yoniq turadi)</label><input type="number" id="t_relay" value="30"></div>
+    </div>
+    <div class="dim" style="font-size:12px;margin-top:4px">Bo'sh turish vaqtlari daqiqada, texnik
+      qiymatlar soniyada. Protokolda hammasi soniyada ketadi.</div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="auto" style="width:auto" checked> Avtomatik o'chirish</label>
+    <button class="pri" id="sendcfg" style="width:100%;margin-top:8px">Sozlamani yuborish</button>
+  </section>
+
+  <section class="card c8">
+    <h2>Saqlangan hodisalar · <span id="evcount">0</span> ta · tasdiqlangan seq: <span id="acked">—</span></h2>
+    <div class="tbl"><table>
+      <thead><tr><th class="num">seq</th><th>Turi</th><th>Boshlanish</th><th>Tugash</th><th class="num">Davom, s</th><th>Sabab</th><th>Qo'shimcha</th></tr></thead>
+      <tbody id="rows"></tbody></table></div>
+  </section>
+
+  <section class="card c4">
+    <h2>Stanok yoqiq turgan vaqt (kun bo'yicha)</h2>
+    <div id="days" class="dim">Hali POWER_ON hodisasi yo'q</div>
+    <p class="dim" style="font-size:12px">Vaqti noma'lum hodisa (Pico toki uzilgan paytda yig'ilgan) qabul qilingan kun ichida hisoblanadi.</p>
+    <button id="clear">Saqlangan hodisalarni tozalash</button>
+  </section>
+
+  <section class="card c12">
+    <h2>USB trafik</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const PICO_USB_VENDOR = 0x2E8A;           // Raspberry Pi
+const TIME_PERIOD_MS = 10000;
+const LINK_TIMEOUT_MS = 30000;
+const STORE_KEY = "cnc2130_events";
+
+// ------------------------------------------------------------- "server"
+// MES dasturchilari: shu ikki funksiyani haqiqiy serverga almashtiring.
+// saveEvent resolve bo'lgandagina hodisa tasdiqlanadi (TZ 5.3).
+function loadEvents() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY) || "{}"); } catch (e) { return {}; }
+}
+async function saveEvent(ev) {
+  // Masalan: await fetch("/api/machines/" + ev.machine + "/events", {method: "POST", body: JSON.stringify(ev)})
+  const all = loadEvents();
+  const old = all[ev.id];
+  if (!old) {
+    ev.received_at = new Date().toISOString();   // vaqti noma'lum hodisa shu kunga yoziladi
+    all[ev.id] = ev;
+  } else if (!old.start && ev.start) {
+    // Dublikat, lekin endi aniq vaqt bilan keldi (Pico vaqtni tiklagan)
+    Object.assign(old, {start: ev.start, end: ev.end, time_uncertain: ev.time_uncertain, time_restored: ev.time_restored});
+  } else {
+    return;
+  }
+  localStorage.setItem(STORE_KEY, JSON.stringify(all));
+}
+
+// ------------------------------------------------------------- transport
+let port = null, reader = null, writer = null, demo = null;
+let lastRx = 0, timeTimer = null, acked = null, blocked = false;
+const received = new Set();
+const enc = new TextEncoder();
+
+function log(dir, text) {
+  const el = $("#log");
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `${t} ${dir.padEnd(6)} ${text}\n` + el.textContent.slice(0, 20000);
+}
+
+async function send(obj) {
+  const line = JSON.stringify(obj);
+  log("PC>", line);
+  if (demo) return demo.receive(obj);
+  if (!writer) return;
+  await writer.write(enc.encode(line + "\n"));
+}
+
+function sendTime() {
+  const d = new Date();   // kompyuterning mahalliy vaqti
+  return send({t: "time", ts: [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()]});
+}
+
+async function openPort(p) {
+  port = p;
+  await port.open({baudRate: 115200});
+  writer = port.writable.getWriter();
+  setConnected(true);
+  sendTime();
+  timeTimer = setInterval(sendTime, TIME_PERIOD_MS);
+  readLoop();
+}
+
+async function readLoop() {
+  const decoder = new TextDecoder();
+  let buf = "";
+  try {
+    reader = port.readable.getReader();
+    while (true) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (line) onLine(line);
+      }
+    }
+  } catch (e) {
+    log("XATO", "o'qish to'xtadi: " + e.message);
+  } finally {
+    await closePort();
+  }
+}
+
+async function closePort() {
+  clearInterval(timeTimer);
+  try { if (reader) { await reader.cancel(); reader.releaseLock(); } } catch (e) {}
+  try { if (writer) writer.releaseLock(); } catch (e) {}
+  try { if (port) await port.close(); } catch (e) {}
+  reader = writer = port = null;
+  setConnected(false);
+}
+
+function setConnected(on) {
+  $("#connect").hidden = on;
+  $("#disconnect").hidden = !on;
+  if (!on) { acked = null; received.clear(); showNoData(); }
+}
+
+// ------------------------------------------------------------- Pico xabarlari
+async function onLine(line) {
+  let msg;
+  try { msg = JSON.parse(line); } catch (e) { log("pico", line); return; }   // print() qatorlari
+  lastRx = Date.now();
+  if (msg.t !== "state") log("PICO>", line.slice(0, 300));
+  if (msg.t === "hello") {
+    $("#pinfo").textContent = `${msg.machine} · yuklanish #${msg.boot}`;
+    acked = msg.last_ack;
+    if (msg.need_time) sendTime();
+  } else if (msg.t === "state") {
+    if (acked === null || msg.last_ack > acked) acked = msg.last_ack;
+    blocked = msg.blocked;
+    renderState(msg);
+  } else if (msg.t === "event") {
+    await onEvent(msg);
+  } else if (msg.t === "log") {
+    log("pico", msg.msg);
+  }
+}
+
+async function onEvent(ev) {
+  delete ev.t;
+  try {
+    await saveEvent(ev);
+  } catch (e) {
+    log("XATO", "hodisa saqlanmadi, tasdiqlanmaydi: " + e.message);
+    return;                   // Pico keyingi yurak urishida qayta yuboradi
+  }
+  received.add(ev.seq);
+  if (acked === null) acked = Math.min(...received) - 1;
+  let n = acked;
+  while (received.has(n + 1)) n++;   // faqat uzilishsiz ketma-ketlik
+  acked = n;
+  await send({t: "ack", seq: acked});
+  renderEvents();
+}
+
+// ------------------------------------------------------------- ko'rinish
+const STATES = {WORKING: "ISHLAYAPTI", OFF: "O'CHIQ", IDLE_HOME: "BO'SH TURIBDI", IDLE_AWAY: "BO'SH TURIBDI",
+                PLANNED_STOP: "REJALI TO'XTASH", BLOCKED: "BLOKLANGAN", SHUTDOWN: "O'CHIRILMOQDA"};
+const human = (s) => { s = Math.floor(s || 0); return s < 60 ? s + " soniya" : s < 3600 ? Math.floor(s / 60) + " daqiqa"
+                       : Math.floor(s / 3600) + " soat " + Math.floor(s % 3600 / 60) + " daqiqa"; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function showNoData() {
+  $("#conn").textContent = "ma'lumot yo'q"; $("#conn").className = "pill bad";
+  $("#banner").className = "banner";
+  $("#big").textContent = "MA'LUMOT YO'Q";
+  $("#sub").textContent = "Pico dan xabar kelmayapti — stanok o'chiq deb hisoblanadi";
+}
+
+function renderState(s) {
+  $("#conn").textContent = "ulangan"; $("#conn").className = "pill ok";
+  const idle = s.state === "IDLE_HOME" || s.state === "IDLE_AWAY";
+  $("#banner").className = "banner st-" + (idle ? "IDLE" : s.state);
+  $("#big").textContent = STATES[s.state] + (idle ? " — " + human(s.idle_sec) : s.state === "PLANNED_STOP" ? " — " + s.planned : "");
+  $("#sub").textContent = idle ? (s.home ? "0 nuqtada" : "0 nuqtadan tashqarida") + " · chegara " + human(s.home ? s.t1 : s.t2)
+    : s.job ? "Ish: " + s.job : "";
+  $("#kv").innerHTML = [
+    ["Stanok yoqiq", human(s.on_sec) + " (shpindel " + human(s.run_sec) + ")"],
+    ["Ish / operator", (s.job || "—") + " / " + (s.operator || "—")],
+    ["t1 / t2", human(s.t1) + " / " + human(s.t2)],
+    ["t_relay (rele ushlab turish)", human(s.t_relay)],
+    ["Avto o'chirish", s.auto_shutdown ? "yoqiq" : "o'chiq"],
+    ["Ta'mirlash kaliti / rele", (s.maint ? "YOQIQ" : "yo'q") + " / " + (s.relay ? "YONIQ" : "bo'sh")],
+    ["Hodisalar: yozilgan / tasdiqlangan", s.seq + " / " + s.last_ack],
+    ["Pico soati", s.ts ? s.ts.replace("T", " ") + " (" + s.time_source + ")" : "noma'lum"],
+    ["Pico yoqilgandan beri", human(s.uptime_sec)],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+}
+
+function renderEvents() {
+  const evs = Object.values(loadEvents()).sort((a, b) => b.seq - a.seq);
+  $("#evcount").textContent = evs.length;
+  $("#acked").textContent = acked ?? "—";
+  const INNER = new Set(["id", "seq", "machine", "type", "start", "end", "duration_sec", "job", "operator",
+                         "reason_required", "time_uncertain", "time_restored", "received_at"]);
+  $("#rows").innerHTML = evs.slice(0, 200).map(e => {
+    const extra = Object.entries(e).filter(([k]) => !INNER.has(k)).map(([k, v]) => k + "=" + v).join(", ");
+    const start = e.start ? e.start.replace("T", " ") : '<span class="pill mid">kun ichida</span>';
+    return `<tr><td class="num">${e.seq}</td><td>${esc(e.type)}</td><td>${e.start ? esc(start) : start}</td>
+      <td>${esc((e.end || "").replace("T", " "))}${e.time_restored ? ' <span class="pill ok">tiklandi</span>' : ""}</td>
+      <td class="num">${e.duration_sec ?? "—"}</td><td>${e.reason_required ? '<span class="pill bad">kerak</span>' : ""}</td>
+      <td class="dim">${esc(extra)}</td></tr>`;
+  }).join("") || '<tr><td colspan="7" class="dim">Hali hodisa yo\'q</td></tr>';
+
+  const days = {};
+  for (const e of evs) {
+    if (e.type !== "POWER_ON") continue;
+    const day = (e.end || e.received_at).slice(0, 10);
+    days[day] = (days[day] || 0) + (e.duration_sec || 0);
+  }
+  const list = Object.entries(days).sort().reverse();
+  $("#days").innerHTML = list.length ? list.map(([d, s]) => `<div><b>${d}</b> — ${human(s)}</div>`).join("") : "Hali POWER_ON hodisasi yo'q";
+}
+
+// ------------------------------------------------------------- tugmalar
+document.querySelectorAll("[data-cmd]").forEach(b => b.onclick = () => {
+  const c = {t: "cmd", cmd: b.dataset.cmd};
+  if (c.cmd === "start_job") { c.job = $("#job").value; c.operator = $("#oper").value; }
+  send(c);
+});
+document.querySelectorAll("[data-stop]").forEach(b => b.onclick = () =>
+  send({t: "cmd", cmd: "planned_stop", type: b.dataset.stop, planned_sec: +b.dataset.sec}));
+$("#block").onclick = () => send({t: "cmd", cmd: "block", value: !blocked});
+// Daqiqada kiritiladi, protokolda soniyada ketadi (vergulli kasr ham bo'ladi)
+const asSec = (id) => Math.round(parseFloat(String($(id).value).replace(",", ".")) * 60);
+$("#sendcfg").onclick = () => {
+  const cfg = {t: "config", t1: asSec("#t1"), t2: asSec("#t2"), t_reason: asSec("#t_reason"),
+               t_merge: +$("#t_merge").value, t_relay: +$("#t_relay").value,
+               auto_shutdown: $("#auto").checked};
+  const bad = ["t1", "t2", "t_reason", "t_merge", "t_relay"].filter(k => !Number.isFinite(cfg[k]));
+  if (bad.length) return log("XATO", "noto'g'ri qiymat: " + bad.join(", "));
+  send(cfg);
+};
+$("#clear").onclick = () => { localStorage.removeItem(STORE_KEY); renderEvents(); };
+$("#disconnect").onclick = () => closePort();
+$("#connect").onclick = async () => {
+  if (demo) return;
+  try {
+    const p = await navigator.serial.requestPort({filters: [{usbVendorId: PICO_USB_VENDOR}]});
+    await openPort(p);
+  } catch (e) { log("XATO", e.message); }
+};
+
+// Aloqa belgisi: 30 s xabar kelmasa - ma'lumot yo'q
+setInterval(() => { if (Date.now() - lastRx > LINK_TIMEOUT_MS) showNoData(); }, 2000);
+
+// ------------------------------------------------------------- demo (Pico siz)
+function startDemo() {
+  const s = {machine: "cnc-2130-01", state: "IDLE_HOME", pwr: 1, run: 0, home: 1, maint: 0, relay: 0, idle_sec: 0,
+             on_sec: 0, run_sec: 0, job: null, operator: null, planned: null, blocked: false, t1: 900, t2: 900,
+             t_reason: 900, t_merge: 30, t_relay: 30, auto_shutdown: true, seq: 0, last_ack: 0, ts: null, time_source: "none",
+             uptime_sec: 0, boot: 3};
+  const pending = [];
+  const emit = (o) => setTimeout(() => onLine(JSON.stringify(o)), 30);
+  const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+  const mkEvent = (type, dur, extra, untimed) => {
+    s.seq++;
+    const end = new Date();
+    const ev = Object.assign({t: "event", seq: s.seq, id: "cnc213001/" + String(s.seq).padStart(9, "0"), machine: s.machine,
+      type, start: untimed ? null : iso(new Date(end - dur * 1000)), end: untimed ? null : iso(end), duration_sec: dur,
+      job: s.job, operator: s.operator, reason_required: type !== "POWER_ON", time_uncertain: !!untimed}, extra || {});
+    pending.push(ev);
+  };
+  demo = {
+    receive(o) {
+      if (o.t === "time") { s.ts = "x"; s.time_source = "pc"; }
+      if (o.t === "ack") { s.last_ack = o.seq; while (pending.length && pending[0].seq <= o.seq) pending.shift(); }
+      if (o.t === "config") Object.assign(s, {t1: o.t1, t2: o.t2, t_reason: o.t_reason, t_merge: o.t_merge,
+                                              t_relay: o.t_relay, auto_shutdown: o.auto_shutdown});
+      if (o.t === "cmd" && o.cmd === "start_job") Object.assign(s, {job: o.job, operator: o.operator, state: "WORKING", run: 1});
+      if (o.t === "cmd" && o.cmd === "end_job") Object.assign(s, {job: null, state: "IDLE_HOME", run: 0});
+      if (o.t === "cmd" && o.cmd === "planned_stop") Object.assign(s, {state: "PLANNED_STOP", planned: o.type});
+      if (o.t === "cmd" && o.cmd === "planned_stop_end") { Object.assign(s, {state: "IDLE_HOME", planned: null}); mkEvent("PLANNED_STOP", 600, {stop_type: "LUNCH"}); }
+      if (o.t === "cmd" && o.cmd === "block") s.blocked = o.value;
+    }
+  };
+  setConnected(true);
+  $("#connect").textContent = "DEMO rejimi";
+  emit({t: "hello", machine: s.machine, boot: s.boot, need_time: true, seq: 0, last_ack: 0});
+  // Kompyuter o'chiq paytda yig'ilgan: biri vaqti tiklangan, biri Pico toki uzilgani uchun noma'lum
+  mkEvent("POWER_ON", 5400, {run_sec: 0, time_restored: true});
+  mkEvent("POWER_ON", 1800, {run_sec: 0, from_boot: true}, true);
+  mkEvent("SPINDLE_IDLE", 1200, null, true);
+  sendTime();
+  setInterval(() => {
+    s.uptime_sec += 1; s.on_sec += 1;
+    if (s.state === "IDLE_HOME") s.idle_sec += 1; else s.idle_sec = 0;
+    if (s.run) s.run_sec += 1;
+  }, 1000);
+  setInterval(() => { const st = Object.assign({t: "state"}, s, {ts: s.ts ? iso(new Date()) : null}); emit(st); }, 1000);
+  setInterval(() => pending.slice(0, 10).forEach(emit), 3000);
+}
+
+// ------------------------------------------------------------- ishga tushirish
+renderEvents();
+if (location.hash === "#demo") {
+  startDemo();
+} else if (!("serial" in navigator)) {
+  $("#nosupport").hidden = false;
+  $("#nosupport").textContent = window.isSecureContext
+    ? "Bu brauzerda Web Serial yo'q. Chrome yoki Edge da oching."
+    : "Web Serial faqat xavfsiz manbada ishlaydi: https://, http://localhost yoki faylni to'g'ridan-to'g'ri ochish.";
+  $("#connect").disabled = true;
+} else {
+  // Oldin ruxsat berilgan Pico ga o'zi ulanadi; USB qayta ulansa ham
+  navigator.serial.getPorts().then(ps => { const p = ps[0]; if (p) openPort(p).catch(e => log("XATO", e.message)); });
+  navigator.serial.addEventListener("connect", (e) => { if (!port) openPort(e.target).catch(err => log("XATO", err.message)); });
+}
+</script>
+</body>
+</html>
